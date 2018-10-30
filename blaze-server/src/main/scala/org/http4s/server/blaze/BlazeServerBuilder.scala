@@ -182,27 +182,47 @@ class BlazeServerBuilder[F[_]](
         if (address.isUnresolved) new InetSocketAddress(address.getHostName, address.getPort)
         else address
 
+      def connectionInfo(secure: Boolean, local: InetSocketAddress, remote: InetSocketAddress) =
+        AttributeEntry(
+          Request.Keys.ConnectionInfo,
+          Request.Connection(
+            local = local,
+            remote = remote,
+            secure = secure
+          )
+        )
+
+      def sslInfo(engine: SSLEngine) =
+        AttributeEntry(
+          Request.Keys.sslInfo,
+          Request.SSLInfo(
+            sessionId = engine.getSession.getId,
+            cipherSuite = engine.getSession.getCipherSuite,
+            certs = engine.getSession.getPeerCertificateChain
+          )
+        )
+
       val pipelineFactory: SocketConnection => Future[LeafBuilder[ByteBuffer]] = {
         conn: SocketConnection =>
-          def requestAttributes(secure: Boolean) =
-            (conn.local, conn.remote) match {
-              case (local: InetSocketAddress, remote: InetSocketAddress) =>
+          def requestAttributes(secure: Boolean, engine: Option[SSLEngine]) =
+            (conn.local, conn.remote, engine) match {
+              case (local: InetSocketAddress, remote: InetSocketAddress, Some(e)) =>
                 AttributeMap(
-                  AttributeEntry(
-                    Request.Keys.ConnectionInfo,
-                    Request.Connection(
-                      local = local,
-                      remote = remote,
-                      secure = secure
-                    )))
+                  connectionInfo(secure, local, remote),
+                  sslInfo(e)
+                )
+              case (local: InetSocketAddress, remote: InetSocketAddress, None) =>
+                AttributeMap(
+                  connectionInfo(secure, local, remote)
+                )
               case _ =>
                 AttributeMap.empty
             }
 
-          def http1Stage(secure: Boolean) =
+          def http1Stage(secure: Boolean, engine: Option[SSLEngine]) =
             Http1ServerStage(
               httpApp,
-              requestAttributes(secure = secure),
+              requestAttributes(secure = secure, engine),
               executionContext,
               enableWebSockets,
               maxRequestLineLen,
@@ -217,7 +237,7 @@ class BlazeServerBuilder[F[_]](
               httpApp,
               maxRequestLineLen,
               maxHeadersLen,
-              requestAttributes(secure = true),
+              requestAttributes(secure = true, engine.some),
               executionContext,
               serviceErrorHandler,
               responseHeaderTimeout
@@ -236,7 +256,7 @@ class BlazeServerBuilder[F[_]](
 
                 var lb = LeafBuilder(
                   if (isHttp2Enabled) http2Stage(engine)
-                  else http1Stage(secure = true)
+                  else http1Stage(secure = true, engine.some)
                 )
                 lb = prependIdleTimeout(lb)
                 lb.prepend(new SSLStage(engine))
@@ -244,7 +264,7 @@ class BlazeServerBuilder[F[_]](
               case None =>
                 if (isHttp2Enabled)
                   logger.warn("HTTP/2 support requires TLS. Falling back to HTTP/1.")
-                var lb = LeafBuilder(http1Stage(secure = false))
+                var lb = LeafBuilder(http1Stage(secure = false, None))
                 lb = prependIdleTimeout(lb)
                 lb
             }

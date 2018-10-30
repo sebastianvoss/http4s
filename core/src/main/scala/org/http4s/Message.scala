@@ -6,6 +6,8 @@ import fs2._
 import fs2.text._
 import java.io.File
 import java.net.{InetAddress, InetSocketAddress}
+import javax.security.cert.X509Certificate
+
 import org.http4s.headers._
 import org.log4s.getLogger
 
@@ -324,12 +326,14 @@ object Request {
     ) {}
 
   final case class Connection(local: InetSocketAddress, remote: InetSocketAddress, secure: Boolean)
+  final case class SSLInfo(sessionId: Array[Byte], cipherSuite: String, certs: Array[X509Certificate])
 
   object Keys {
     val PathInfoCaret = AttributeKey[Int]
     val PathTranslated = AttributeKey[File]
     val ConnectionInfo = AttributeKey[Connection]
     val ServerSoftware = AttributeKey[ServerSoftware]
+    val sslInfo = AttributeKey[SSLInfo]
   }
 }
 
