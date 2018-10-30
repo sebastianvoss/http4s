@@ -268,7 +268,7 @@ class BlazeServerBuilder[F[_]](
 
                 var lb = LeafBuilder(
                   if (isHttp2Enabled) http2Stage(engine)
-                  else http1Stage(secure = true, Some(engine))
+                  else http1Stage(secure = true, engine.some)
                 )
                 lb = prependIdleTimeout(lb)
                 lb.prepend(new SSLStage(engine))
