@@ -9,6 +9,7 @@ import cats.effect._
 import java.io.FileInputStream
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
+import javax.security.cert.X509Certificate
 import java.security.{KeyStore, Security}
 import javax.net.ssl.{KeyManagerFactory, SSLContext, SSLEngine, TrustManagerFactory}
 import org.http4s.blaze.{BuildInfo => BlazeBuildInfo}
@@ -24,6 +25,7 @@ import org.log4s.getLogger
 import scala.collection.immutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
+import scala.util.Try
 
 /**
   * BlazeBuilder is the component for the builder pattern aggregating
@@ -192,24 +194,34 @@ class BlazeServerBuilder[F[_]](
           )
         )
 
-      def sslInfo(engine: SSLEngine) =
+      def sslInfo(engine: SSLEngine) = {
+        val session = engine.getSession
+        val certs =
+          Try {
+            session.getPeerCertificateChain
+          } handleError { t =>
+            logger.warn(t)(t.getMessage)
+            Array.empty[X509Certificate]
+          }
+
         AttributeEntry(
-          Request.Keys.sslInfo,
+          Request.Keys.SSLInfo,
           Request.SSLInfo(
-            sessionId = engine.getSession.getId,
-            cipherSuite = engine.getSession.getCipherSuite,
-            certs = engine.getSession.getPeerCertificateChain
+            sessionId = session.getId,
+            cipherSuite = session.getCipherSuite,
+            certs = certs.getOrElse(Array.empty[X509Certificate])
           )
         )
+      }
 
       val pipelineFactory: SocketConnection => Future[LeafBuilder[ByteBuffer]] = {
         conn: SocketConnection =>
           def requestAttributes(secure: Boolean, engine: Option[SSLEngine]) =
             (conn.local, conn.remote, engine) match {
-              case (local: InetSocketAddress, remote: InetSocketAddress, Some(e)) =>
+              case (local: InetSocketAddress, remote: InetSocketAddress, Some(sslEngine)) =>
                 AttributeMap(
                   connectionInfo(secure, local, remote),
-                  sslInfo(e)
+                  sslInfo(sslEngine)
                 )
               case (local: InetSocketAddress, remote: InetSocketAddress, None) =>
                 AttributeMap(
@@ -256,7 +268,7 @@ class BlazeServerBuilder[F[_]](
 
                 var lb = LeafBuilder(
                   if (isHttp2Enabled) http2Stage(engine)
-                  else http1Stage(secure = true, engine.some)
+                  else http1Stage(secure = true, Some(engine))
                 )
                 lb = prependIdleTimeout(lb)
                 lb.prepend(new SSLStage(engine))

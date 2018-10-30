@@ -333,7 +333,7 @@ object Request {
     val PathTranslated = AttributeKey[File]
     val ConnectionInfo = AttributeKey[Connection]
     val ServerSoftware = AttributeKey[ServerSoftware]
-    val sslInfo = AttributeKey[SSLInfo]
+    val SSLInfo = AttributeKey[SSLInfo]
   }
 }
 
